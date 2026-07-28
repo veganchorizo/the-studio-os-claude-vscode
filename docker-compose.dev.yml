@@ -9,10 +9,6 @@ services:
     ports:
       - "5432:5432"
 
-  studio-os-ollama:
-    ports:
-      - "11434:11434"
-
   studio-os-api:
     environment:
       NODE_ENV: development

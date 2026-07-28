@@ -13,7 +13,6 @@ networks:
 
 volumes:
   db-data:
-  ollama-data:
   storage-data: # archived original documents (never overwritten)
   watch-data: # drop folder monitored by the ingest service
   backups-data:
@@ -38,26 +37,8 @@ services:
       timeout: 5s
       retries: 10
 
-  studio-os-ollama:
-    <<: *restart
-    image: ollama/ollama:latest
-    container_name: studio-os-ollama
-    volumes:
-      - ollama-data:/root/.ollama
-    networks: [studio]
-    # GPU is optional; uncomment to enable NVIDIA passthrough.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
-    healthcheck:
-      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
+  # Ollama is expected to run outside this stack (e.g. on the Docker host or a
+  # remote server). Configure the endpoint via OLLAMA_BASE_URL in .env.
 
   studio-os-api:
     <<: *restart
@@ -70,7 +51,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-studio}:${POSTGRES_PASSWORD:-change-me-in-production}@studio-os-db:5432/${POSTGRES_DB:-studio_os}?schema=public
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:8080}
-      OLLAMA_BASE_URL: http://studio-os-ollama:11434
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       LLM_MODEL: ${LLM_MODEL:-llama3.1:8b}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
       EMBEDDING_DIM: ${EMBEDDING_DIM:-768}
@@ -82,11 +63,11 @@ services:
     volumes:
       - storage-data:/data/storage
       - watch-data:/data/watch
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       studio-os-db:
         condition: service_healthy
-      studio-os-ollama:
-        condition: service_started
     networks: [studio]
 
   studio-os-worker:
@@ -97,7 +78,7 @@ services:
     container_name: studio-os-worker
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-studio}:${POSTGRES_PASSWORD:-change-me-in-production}@studio-os-db:5432/${POSTGRES_DB:-studio_os}?schema=public
-      OLLAMA_BASE_URL: http://studio-os-ollama:11434
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
       CHUNK_SIZE: ${CHUNK_SIZE:-1000}
       CHUNK_OVERLAP: ${CHUNK_OVERLAP:-150}
@@ -106,6 +87,8 @@ services:
       STORAGE_DIR: /data/storage
     volumes:
       - storage-data:/data/storage
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       studio-os-db:
         condition: service_healthy
