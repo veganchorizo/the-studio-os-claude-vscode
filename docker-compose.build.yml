@@ -1,0 +1,48 @@
+# Build overrides. Adds the build context back onto each service so images can
+# be built (and pushed) from source. Requires the full repository to be present.
+#
+#   # build all images locally, tagged the same as the published ones:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml build
+#
+#   # build and push to GHCR (after `docker login ghcr.io`):
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml push
+#
+# The runtime `docker-compose.yml` alone never needs source files on the host.
+
+name: studio-os
+
+services:
+  studio-os-db:
+    build:
+      context: .
+      dockerfile: docker/db/Dockerfile
+
+  studio-os-api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+
+  studio-os-worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+
+  studio-os-ingest:
+    build:
+      context: .
+      dockerfile: apps/ingest/Dockerfile
+
+  studio-os-web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+
+  studio-os-backups:
+    build:
+      context: .
+      dockerfile: docker/backups/Dockerfile
+
+  studio-os-nginx:
+    build:
+      context: .
+      dockerfile: docker/nginx/Dockerfile

@@ -1,4 +1,12 @@
 # The Studio OS — production stack. One command: `docker compose up -d`.
+#
+# This stack runs entirely from prebuilt images published to GitHub Container
+# Registry (GHCR). No source files need to be present on the host — just this
+# compose file and a .env. To fetch the latest images: `docker compose pull`.
+#
+# Images are built and pushed by .github/workflows/docker-publish.yml.
+# Override the registry/tag via REGISTRY and IMAGE_TAG in .env if needed.
+#
 # Everything communicates over the internal `studio` network. Only the web UI
 # port is published to the host. No service reaches the public internet.
 
@@ -20,7 +28,7 @@ volumes:
 services:
   studio-os-db:
     <<: *restart
-    image: pgvector/pgvector:pg16
+    image: ${REGISTRY:-ghcr.io/veganchorizo}/the-studio-os-db:${IMAGE_TAG:-latest}
     container_name: studio-os-db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-studio}
@@ -29,7 +37,6 @@ services:
       TZ: ${TZ:-UTC}
     volumes:
       - db-data:/var/lib/postgresql/data
-      - ./docker/db/init:/docker-entrypoint-initdb.d:ro
     networks: [studio]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-studio} -d ${POSTGRES_DB:-studio_os}"]
@@ -42,9 +49,7 @@ services:
 
   studio-os-api:
     <<: *restart
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
+    image: ${REGISTRY:-ghcr.io/veganchorizo}/the-studio-os-api:${IMAGE_TAG:-latest}
     container_name: studio-os-api
     environment:
       NODE_ENV: production
@@ -72,9 +77,7 @@ services:
 
   studio-os-worker:
     <<: *restart
-    build:
-      context: .
-      dockerfile: apps/worker/Dockerfile
+    image: ${REGISTRY:-ghcr.io/veganchorizo}/the-studio-os-worker:${IMAGE_TAG:-latest}
     container_name: studio-os-worker
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-studio}:${POSTGRES_PASSWORD:-change-me-in-production}@studio-os-db:5432/${POSTGRES_DB:-studio_os}?schema=public
@@ -96,9 +99,7 @@ services:
 
   studio-os-ingest:
     <<: *restart
-    build:
-      context: .
-      dockerfile: apps/ingest/Dockerfile
+    image: ${REGISTRY:-ghcr.io/veganchorizo}/the-studio-os-ingest:${IMAGE_TAG:-latest}
     container_name: studio-os-ingest
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-studio}:${POSTGRES_PASSWORD:-change-me-in-production}@studio-os-db:5432/${POSTGRES_DB:-studio_os}?schema=public
@@ -114,9 +115,7 @@ services:
 
   studio-os-web:
     <<: *restart
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
+    image: ${REGISTRY:-ghcr.io/veganchorizo}/the-studio-os-web:${IMAGE_TAG:-latest}
     container_name: studio-os-web
     ports:
       - "${WEB_PORT:-8080}:80"
@@ -126,9 +125,7 @@ services:
 
   studio-os-backups:
     <<: *restart
-    build:
-      context: .
-      dockerfile: docker/backups/Dockerfile
+    image: ${REGISTRY:-ghcr.io/veganchorizo}/the-studio-os-backups:${IMAGE_TAG:-latest}
     container_name: studio-os-backups
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-studio}
@@ -148,13 +145,11 @@ services:
   #   docker compose --profile proxy up -d
   studio-os-nginx:
     <<: *restart
-    image: nginx:1.27-alpine
+    image: ${REGISTRY:-ghcr.io/veganchorizo}/the-studio-os-nginx:${IMAGE_TAG:-latest}
     container_name: studio-os-nginx
     profiles: ["proxy"]
     ports:
       - "${PROXY_PORT:-80}:80"
-    volumes:
-      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - studio-os-web
       - studio-os-api

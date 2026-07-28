@@ -1,15 +1,21 @@
-# Development overrides:
-#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Development overrides (build from local source instead of pulling GHCR images):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 # Exposes the DB and API to the host and runs the web dev server with HMR.
 
 name: studio-os
 
 services:
   studio-os-db:
+    build:
+      context: .
+      dockerfile: docker/db/Dockerfile
     ports:
       - "5432:5432"
 
   studio-os-api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
     environment:
       NODE_ENV: development
     ports:

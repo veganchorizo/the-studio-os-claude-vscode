@@ -1,0 +1,79 @@
+name: Publish Docker images
+
+# Builds every service image and pushes them to GitHub Container Registry so the
+# stack can be deployed with `docker compose pull && docker compose up -d` and
+# no source files on the host.
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: the-studio-os-db
+            dockerfile: docker/db/Dockerfile
+          - name: the-studio-os-api
+            dockerfile: apps/api/Dockerfile
+          - name: the-studio-os-worker
+            dockerfile: apps/worker/Dockerfile
+          - name: the-studio-os-ingest
+            dockerfile: apps/ingest/Dockerfile
+          - name: the-studio-os-web
+            dockerfile: apps/web/Dockerfile
+          - name: the-studio-os-backups
+            dockerfile: docker/backups/Dockerfile
+          - name: the-studio-os-nginx
+            dockerfile: docker/nginx/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lowercase image namespace
+        id: ns
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.ns.outputs.owner }}/${{ matrix.name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
