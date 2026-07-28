@@ -1,0 +1,675 @@
+// The Studio OS — data model.
+// Local-first: a single Postgres database (with the pgvector extension) owns all state.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector, pg_trgm]
+}
+
+// ============================================================================
+// Auth, RBAC, audit
+// ============================================================================
+
+enum Role {
+  ADMIN
+  ENGINEER
+  MANAGER
+  INTERN
+  VIEWER
+}
+
+model User {
+  id           String    @id @default(cuid())
+  username     String    @unique
+  email        String?   @unique
+  displayName  String?
+  passwordHash String
+  role         Role      @default(VIEWER)
+  disabled     Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  authSessions   AuthSession[]
+  auditLogs      AuditLog[]
+  conversations  Conversation[]
+  engineerFor    RecordingSession[] @relation("SessionEngineer")
+  assistantFor   RecordingSession[] @relation("SessionAssistant")
+  assignedTasks  Task[]
+
+  @@index([role])
+}
+
+model AuthSession {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  userAgent String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json     @default("{}")
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================================================
+// People & projects
+// ============================================================================
+
+model Artist {
+  id        String   @id @default(cuid())
+  name      String
+  genres    String[] @default([])
+  bio       String?
+  notes     String?
+  clientId  String?
+  client    Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions RecordingSession[]
+  projects Project[]
+
+  @@index([name])
+}
+
+model Client {
+  id               String   @id @default(cuid())
+  name             String
+  company          String?
+  email            String?
+  phone            String?
+  address          String?
+  preferences      String?
+  favoriteMicIds   String[] @default([])
+  coffeePreference String?
+  tags             String[] @default([])
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  artists  Artist[]
+  projects Project[]
+  sessions RecordingSession[]
+  invoices Invoice[]
+
+  @@index([name])
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  status      String   @default("ACTIVE")
+  clientId    String?
+  client      Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  artistId    String?
+  artist      Artist?  @relation(fields: [artistId], references: [id], onDelete: SetNull)
+  budget      Float?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sessions RecordingSession[]
+  invoices Invoice[]
+
+  @@index([status])
+}
+
+// ============================================================================
+// Recording sessions
+// ============================================================================
+
+enum SessionStatus {
+  SCHEDULED
+  IN_PROGRESS
+  TRACKING
+  MIXING
+  MASTERING
+  COMPLETED
+  CANCELLED
+}
+
+model RecordingSession {
+  id          String        @id @default(cuid())
+  title       String
+  status      SessionStatus @default(SCHEDULED)
+  date        DateTime
+  endDate     DateTime?
+  room        String?
+  notes       String?
+  problems    String?
+  patching    String?
+  outboard    String[]      @default([])
+  deliverables String[]     @default([])
+  // JSON payloads matching the shared contracts (micUses, cueMixes).
+  micUses     Json          @default("[]")
+  cueMixes    Json          @default("[]")
+
+  artistId    String?
+  artist      Artist?  @relation(fields: [artistId], references: [id], onDelete: SetNull)
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  clientId    String?
+  client      Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  engineerId  String?
+  engineer    User?    @relation("SessionEngineer", fields: [engineerId], references: [id], onDelete: SetNull)
+  assistantId String?
+  assistant   User?    @relation("SessionAssistant", fields: [assistantId], references: [id], onDelete: SetNull)
+
+  songs        Song[]
+  mixRevisions MixRevision[]
+  equipment    Equipment[]   @relation("SessionEquipment")
+  documents    Document[]    @relation("SessionDocuments")
+  invoices     Invoice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+  @@index([status])
+  @@index([artistId])
+  @@index([projectId])
+}
+
+model Song {
+  id        String  @id @default(cuid())
+  sessionId String
+  session   RecordingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  title     String
+  bpm       Int?
+  key       String?
+  notes     String?
+
+  @@index([sessionId])
+}
+
+model MixRevision {
+  id         String   @id @default(cuid())
+  sessionId  String
+  session    RecordingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  version    Int
+  label      String?
+  notes      String?
+  documentId String?
+  createdAt  DateTime @default(now())
+
+  @@unique([sessionId, version])
+  @@index([sessionId])
+}
+
+// ============================================================================
+// Equipment & maintenance
+// ============================================================================
+
+enum EquipmentCategory {
+  MICROPHONE
+  PREAMP
+  COMPRESSOR
+  EQ
+  CONVERTER
+  MONITOR
+  OUTBOARD
+  INSTRUMENT
+  AMPLIFIER
+  CONSOLE
+  COMPUTER
+  INTERFACE
+  CABLE
+  OTHER
+}
+
+enum EquipmentStatus {
+  OPERATIONAL
+  NEEDS_SERVICE
+  IN_REPAIR
+  RETIRED
+  ON_LOAN
+}
+
+model Equipment {
+  id                String            @id @default(cuid())
+  manufacturer      String
+  model             String
+  category          EquipmentCategory @default(OTHER)
+  serial            String?
+  status            EquipmentStatus   @default(OPERATIONAL)
+  purchaseDate      DateTime?
+  purchasePrice     Float?
+  warrantyExpiresAt DateTime?
+  location          String?
+  rack              String?
+  rackUnit          Int?
+  notes             String?
+  favoriteUses      String[]          @default([])
+  knownIssues       String[]          @default([])
+  signalChainTags   String[]          @default([])
+  manualDocumentId  String?
+
+  maintenance  MaintenanceRecord[]
+  calibrations CalibrationRecord[]
+  sessions     RecordingSession[]  @relation("SessionEquipment")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+  @@index([status])
+  @@index([manufacturer, model])
+}
+
+enum MaintenanceKind {
+  TUBE_REPLACEMENT
+  CALIBRATION
+  CLEANING
+  FIRMWARE
+  REPAIR
+  CONSUMABLE
+  INSPECTION
+}
+
+model MaintenanceRecord {
+  id          String          @id @default(cuid())
+  equipmentId String
+  equipment   Equipment       @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  kind        MaintenanceKind
+  performedAt DateTime        @default(now())
+  performedBy String?
+  notes       String?
+  cost        Float?
+  nextDueAt   DateTime?
+  createdAt   DateTime        @default(now())
+
+  @@index([equipmentId])
+  @@index([nextDueAt])
+}
+
+model CalibrationRecord {
+  id          String    @id @default(cuid())
+  equipmentId String
+  equipment   Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  performedAt DateTime  @default(now())
+  standard    String?
+  result      String?
+  passed      Boolean   @default(true)
+  notes       String?
+  nextDueAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([equipmentId])
+}
+
+// ============================================================================
+// Patchbay
+// ============================================================================
+
+model PatchPreset {
+  id          String            @id @default(cuid())
+  name        String
+  description String?
+  connections PatchConnection[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+model PatchConnection {
+  id         String      @id @default(cuid())
+  presetId   String
+  preset     PatchPreset @relation(fields: [presetId], references: [id], onDelete: Cascade)
+  sourceRow  Int
+  sourceCol  Int
+  destRow    Int
+  destCol    Int
+  label      String?
+  normalled  Boolean     @default(false)
+
+  @@index([presetId])
+}
+
+model CableFault {
+  id          String   @id @default(cuid())
+  location    String
+  description String
+  resolved    Boolean  @default(false)
+  reportedAt  DateTime @default(now())
+  resolvedAt  DateTime?
+}
+
+// ============================================================================
+// Inventory
+// ============================================================================
+
+model InventoryItem {
+  id            String   @id @default(cuid())
+  name          String
+  category      String   @default("OTHER")
+  quantity      Int      @default(0)
+  reorderLevel  Int      @default(0)
+  unit          String?
+  location      String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([category])
+}
+
+// ============================================================================
+// Tasks & calendar
+// ============================================================================
+
+model Task {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  status      String    @default("TODO") // TODO | DOING | DONE | BLOCKED
+  priority    String    @default("MEDIUM")
+  dueAt       DateTime?
+  assigneeId  String?
+  assignee    User?     @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
+  recurrence  String?   // cron-like or RRULE
+  templateOf  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status])
+  @@index([dueAt])
+}
+
+model CalendarEvent {
+  id        String   @id @default(cuid())
+  title     String
+  kind      String   @default("EVENT") // SESSION | MAINTENANCE | DEADLINE | INVOICE | TOUR | TASK
+  start     DateTime
+  end       DateTime?
+  allDay    Boolean  @default(false)
+  refType   String?
+  refId     String?
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@index([start])
+}
+
+// ============================================================================
+// Notes & notifications
+// ============================================================================
+
+model Note {
+  id        String   @id @default(cuid())
+  title     String?
+  body      String
+  read      Boolean  @default(false)
+  refType   String?
+  refId     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([read])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  title     String
+  body      String?
+  level     String   @default("INFO")
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([read])
+}
+
+// ============================================================================
+// Finance
+// ============================================================================
+
+model Invoice {
+  id          String   @id @default(cuid())
+  number      String   @unique
+  clientId    String?
+  client      Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  sessionId   String?
+  session     RecordingSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  status      String   @default("DRAFT") // DRAFT | SENT | PAID | OVERDUE | VOID
+  issuedAt    DateTime @default(now())
+  dueAt       DateTime?
+  currency    String   @default("USD")
+  lineItems   Json     @default("[]")
+  subtotal    Float    @default(0)
+  tax         Float    @default(0)
+  total       Float    @default(0)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  payments Payment[]
+
+  @@index([status])
+  @@index([clientId])
+}
+
+model Payment {
+  id        String   @id @default(cuid())
+  invoiceId String
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount    Float
+  method    String   @default("OTHER")
+  paidAt    DateTime @default(now())
+  notes     String?
+
+  @@index([invoiceId])
+}
+
+model Expense {
+  id          String   @id @default(cuid())
+  description String
+  category    String   @default("OTHER")
+  amount      Float
+  spentAt     DateTime @default(now())
+  projectId   String?
+  notes       String?
+
+  @@index([category])
+  @@index([spentAt])
+}
+
+// ============================================================================
+// Marketing
+// ============================================================================
+
+model MarketingContent {
+  id        String   @id @default(cuid())
+  channel   String   // INSTAGRAM | FACEBOOK | THREADS | LINKEDIN | ARTICLE | NEWSLETTER | SEO | EMAIL | PRESS | ANNOUNCEMENT
+  title     String?
+  body      String
+  status    String   @default("DRAFT")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([channel])
+}
+
+// ============================================================================
+// Intern training
+// ============================================================================
+
+model Lesson {
+  id        String   @id @default(cuid())
+  title     String
+  body      String
+  order     Int      @default(0)
+  category  String   @default("GENERAL")
+  quizzes   Quiz[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Quiz {
+  id        String   @id @default(cuid())
+  lessonId  String
+  lesson    Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  question  String
+  options   Json     @default("[]")
+  answer    Int
+  createdAt DateTime @default(now())
+
+  @@index([lessonId])
+}
+
+model TrainingProgress {
+  id         String   @id @default(cuid())
+  userId     String
+  lessonId   String
+  completed  Boolean  @default(false)
+  score      Int?
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, lessonId])
+}
+
+// ============================================================================
+// Knowledge base & RAG
+// ============================================================================
+
+enum DocumentType {
+  PDF
+  WORD
+  MARKDOWN
+  TEXT
+  CSV
+  JSON
+  XML
+  IMAGE
+  MBOX
+  OTHER
+}
+
+enum DocumentStatus {
+  PENDING
+  PARSING
+  CHUNKING
+  EMBEDDING
+  INDEXED
+  FAILED
+}
+
+model Document {
+  id         String         @id @default(cuid())
+  title      String
+  type       DocumentType   @default(OTHER)
+  status     DocumentStatus @default(PENDING)
+  sourcePath String?
+  storagePath String?
+  mimeType   String?
+  sizeBytes  Int?
+  checksum   String?
+  version    Int            @default(1)
+  supersedes String?
+  metadata   Json           @default("{}")
+  tags       String[]       @default([])
+  content    String?        // extracted plain text (for FTS)
+  error      String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  chunks   DocumentChunk[]
+  sessions RecordingSession[] @relation("SessionDocuments")
+
+  @@index([status])
+  @@index([type])
+  @@index([checksum])
+}
+
+model DocumentChunk {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  index      Int
+  content    String
+  tokens     Int?
+  metadata   Json     @default("{}")
+  // pgvector column. Dimension is fixed by a raw-SQL migration (see migrations).
+  embedding  Unsupported("vector")?
+
+  createdAt DateTime @default(now())
+
+  @@index([documentId])
+}
+
+// ============================================================================
+// AI conversations
+// ============================================================================
+
+enum AgentKind {
+  CHIEF_ENGINEER
+  STUDIO_MANAGER
+  MARKETING_DIRECTOR
+  BUSINESS_ANALYST
+  ARCHIVIST
+  MAINTENANCE_MANAGER
+  INTERN_TRAINER
+}
+
+model Workspace {
+  id            String         @id @default(cuid())
+  name          String
+  createdAt     DateTime       @default(now())
+  conversations Conversation[]
+}
+
+model Conversation {
+  id          String        @id @default(cuid())
+  title       String        @default("New conversation")
+  agent       AgentKind     @default(CHIEF_ENGINEER)
+  pinned      Boolean       @default(false)
+  workspaceId String?
+  workspace   Workspace?    @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  userId      String?
+  user        User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  messages    ChatMessage[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([pinned])
+  @@index([updatedAt])
+}
+
+model ChatMessage {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String // user | assistant | system
+  content        String
+  citations      Json         @default("[]")
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
+}

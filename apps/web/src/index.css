@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* Thin, console-style scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a3341 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #2a3341;
+  border-radius: 4px;
+}
+
+.prose-studio :where(p, ul, ol, pre, table) {
+  margin-block: 0.5rem;
+}
+.prose-studio code {
+  background: #161b24;
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
+  font-size: 0.85em;
+}
+.prose-studio pre {
+  background: #0f1218;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  border: 1px solid #1e2530;
+}
+.prose-studio table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.prose-studio th,
+.prose-studio td {
+  border: 1px solid #1e2530;
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+}
