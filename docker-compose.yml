@@ -1,0 +1,178 @@
+# The Studio OS — production stack. One command: `docker compose up -d`.
+# Everything communicates over the internal `studio` network. Only the web UI
+# port is published to the host. No service reaches the public internet.
+
+name: studio-os
+
+x-restart: &restart
+  restart: unless-stopped
+
+networks:
+  studio:
+    driver: bridge
+
+volumes:
+  db-data:
+  ollama-data:
+  storage-data: # archived original documents (never overwritten)
+  watch-data: # drop folder monitored by the ingest service
+  backups-data:
+
+services:
+  studio-os-db:
+    <<: *restart
+    image: pgvector/pgvector:pg16
+    container_name: studio-os-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-studio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+      POSTGRES_DB: ${POSTGRES_DB:-studio_os}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./docker/db/init:/docker-entrypoint-initdb.d:ro
+    networks: [studio]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-studio} -d ${POSTGRES_DB:-studio_os}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  studio-os-ollama:
+    <<: *restart
+    image: ollama/ollama:latest
+    container_name: studio-os-ollama
+    volumes:
+      - ollama-data:/root/.ollama
+    networks: [studio]
+    # GPU is optional; uncomment to enable NVIDIA passthrough.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  studio-os-api:
+    <<: *restart
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: studio-os-api
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-studio}:${POSTGRES_PASSWORD:-change-me-in-production}@studio-os-db:5432/${POSTGRES_DB:-studio_os}?schema=public
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:8080}
+      OLLAMA_BASE_URL: http://studio-os-ollama:11434
+      LLM_MODEL: ${LLM_MODEL:-llama3.1:8b}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-768}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-admin}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@studio.local}
+      STORAGE_DIR: /data/storage
+      WATCH_DIR: /data/watch
+    volumes:
+      - storage-data:/data/storage
+      - watch-data:/data/watch
+    depends_on:
+      studio-os-db:
+        condition: service_healthy
+      studio-os-ollama:
+        condition: service_started
+    networks: [studio]
+
+  studio-os-worker:
+    <<: *restart
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    container_name: studio-os-worker
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-studio}:${POSTGRES_PASSWORD:-change-me-in-production}@studio-os-db:5432/${POSTGRES_DB:-studio_os}?schema=public
+      OLLAMA_BASE_URL: http://studio-os-ollama:11434
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      CHUNK_SIZE: ${CHUNK_SIZE:-1000}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-150}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+      OCR_ENABLED: ${OCR_ENABLED:-true}
+      STORAGE_DIR: /data/storage
+    volumes:
+      - storage-data:/data/storage
+    depends_on:
+      studio-os-db:
+        condition: service_healthy
+    networks: [studio]
+
+  studio-os-ingest:
+    <<: *restart
+    build:
+      context: .
+      dockerfile: apps/ingest/Dockerfile
+    container_name: studio-os-ingest
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-studio}:${POSTGRES_PASSWORD:-change-me-in-production}@studio-os-db:5432/${POSTGRES_DB:-studio_os}?schema=public
+      WATCH_DIR: /data/watch
+      STORAGE_DIR: /data/storage
+    volumes:
+      - watch-data:/data/watch
+      - storage-data:/data/storage
+    depends_on:
+      studio-os-db:
+        condition: service_healthy
+    networks: [studio]
+
+  studio-os-web:
+    <<: *restart
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: studio-os-web
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      - studio-os-api
+    networks: [studio]
+
+  studio-os-backups:
+    <<: *restart
+    build:
+      context: .
+      dockerfile: docker/backups/Dockerfile
+    container_name: studio-os-backups
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-studio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+      POSTGRES_DB: ${POSTGRES_DB:-studio_os}
+      BACKUP_CRON: ${BACKUP_CRON:-0 3 * * *}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_DIR: /backups
+    volumes:
+      - backups-data:/backups
+    depends_on:
+      studio-os-db:
+        condition: service_healthy
+    networks: [studio]
+
+  # Optional single-origin reverse proxy. Enable with:
+  #   docker compose --profile proxy up -d
+  studio-os-nginx:
+    <<: *restart
+    image: nginx:1.27-alpine
+    container_name: studio-os-nginx
+    profiles: ["proxy"]
+    ports:
+      - "${PROXY_PORT:-80}:80"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - studio-os-web
+      - studio-os-api
+    networks: [studio]

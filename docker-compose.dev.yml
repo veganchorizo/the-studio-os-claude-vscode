@@ -1,0 +1,33 @@
+# Development overrides:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Exposes the DB and API to the host and runs the web dev server with HMR.
+
+name: studio-os
+
+services:
+  studio-os-db:
+    ports:
+      - "5432:5432"
+
+  studio-os-ollama:
+    ports:
+      - "11434:11434"
+
+  studio-os-api:
+    environment:
+      NODE_ENV: development
+    ports:
+      - "3000:3000"
+    command: ["pnpm", "--filter", "@studio-os/api", "dev"]
+
+  # In dev, run Vite directly for hot module reload instead of the static build.
+  studio-os-web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: build
+    command: ["pnpm", "--filter", "@studio-os/web", "dev"]
+    environment:
+      VITE_API_PROXY: http://studio-os-api:3000
+    ports:
+      - "5173:5173"
