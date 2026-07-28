@@ -49,7 +49,7 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-studio}:${POSTGRES_PASSWORD:-change-me-in-production}@studio-os-db:5432/${POSTGRES_DB:-studio_os}?schema=public
-      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-insecure-session-secret-change-me}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:8080}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       LLM_MODEL: ${LLM_MODEL:-llama3.1:8b}
