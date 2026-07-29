@@ -9,7 +9,6 @@ import type { DomainEvent, PluginCommand, StudioPlugin } from "./types.js";
 class PluginRegistry {
   private readonly plugins = new Map<string, StudioPlugin>();
   private readonly extraAgents: AgentDefinition[] = [];
-  private readonly automations = new Map<DomainEvent["type"], StudioPlugin["automations"]>();
 
   register(plugin: StudioPlugin): void {
     if (this.plugins.has(plugin.id)) {

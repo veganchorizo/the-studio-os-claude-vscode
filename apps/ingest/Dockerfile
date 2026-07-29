@@ -8,6 +8,9 @@ FROM base AS build
 COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/shared ./packages/shared
 COPY apps/ingest ./apps/ingest
+# The ingest service reuses the API's Prisma schema. Its package.json is needed
+# so `prisma generate` can resolve the project root during the build.
+COPY apps/api/package.json ./apps/api/package.json
 COPY apps/api/prisma ./apps/api/prisma
 RUN pnpm install --no-frozen-lockfile
 RUN pnpm --filter @studio-os/shared build \

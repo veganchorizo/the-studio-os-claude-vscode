@@ -1,0 +1,15 @@
+# Keep build contexts clean and reproducible. Excluding these ensures images
+# are built from source only — never from host artifacts that could shadow a
+# fresh build (e.g. a stale tsconfig.tsbuildinfo suppressing TypeScript emit).
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/.turbo
+**/.vite
+**/coverage
+**/.env
+**/.env.*
+.git
+.github
+**/.DS_Store
+*.log

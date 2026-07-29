@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+*.log
+
+# Local environment (contains secrets). Commit .env.example instead.
+.env
+.env.local
+.env.*.local
